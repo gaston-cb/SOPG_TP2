@@ -36,7 +36,7 @@
 #include <sys/types.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
-#include <unistd.h>
+
 #define PORT_TCP_INTERFACE_SERVICE 10000 ///! DEL TP 
 #define SOCKET_CONNECT_VALUE 	 1 
 #define SOCKET_DISCONNECT_VALUE -1 
@@ -52,11 +52,11 @@ void signals_set() ;
 void block_signals() ; 
 void unlock_signals() ; 
 
-volatile int socket_connected_flag	    = 0 ; 
-volatile int socket_file_descriptor_tx   = 0 ; 
-volatile int serial_interface_connected  = 0 ; 
-volatile int socket_connected_accept 	= 0 ; 
-volatile int cancel_program_thread =  0 ; 
+volatile sig_atomic_t socket_connected_flag	    = 0 ; 
+volatile sig_atomic_t socket_file_descriptor_tx   = 0 ; 
+volatile sig_atomic_t serial_interface_connected  = 0 ; 
+volatile sig_atomic_t socket_connected_accept 	= 0 ; 
+volatile sig_atomic_t cancel_program_thread =  0 ; 
 
 pthread_mutex_t mutexData = PTHREAD_MUTEX_INITIALIZER ;//  connected_sockets_flag_protect ; 
 
@@ -87,7 +87,7 @@ int main(void)
 	unlock_signals() ; 
 	cancel_program_thread = 1 ; 	
 	while (cancel_program_thread == 1 ){ sleep(2) ; }
-// 	phtread_cancel() ;  
+ 	pthread_cancel(phtread_tcp) ;  
 	pthread_join(phtread_tcp, NULL);
 	pthread_join(phtread_serial, NULL);
 	exit(EXIT_SUCCESS);
