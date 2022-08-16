@@ -82,8 +82,10 @@ int main(void)
 	pthread_t phtread_tcp ; 
 	pthread_t phtread_serial ; 
 	block_signals() ; 
- 	pthread_create(&phtread_tcp, NULL, serial_service_uart, NULL);
 	pthread_create(&phtread_tcp, NULL, tcp_server_connect, NULL);
+
+ 	pthread_create(&phtread_tcp, NULL, serial_service_uart, NULL);
+
 	pthread_join(phtread_tcp, NULL);
 	pthread_join(phtread_serial, NULL);
 	exit(EXIT_SUCCESS);
@@ -93,11 +95,11 @@ int main(void)
 void signals_set(){ 
     struct sigaction sa;
 	sa.sa_handler = sighandler;
-    sa.sa_flags = (SIGPIPE | SIGTERM | SIGINT); // or SA_RESTART
+    //sa.sa_flags = (SIGPIPE | SIGTERM | SIGINT); // or SA_RESTART
     int sigaction_code_error ; 
 	sigemptyset(&sa.sa_mask);
     if ( (sigaction_code_error = sigaction(SIGTERM ,&sa, NULL)) <0){
-        printf("error sigaction with SIGUSR2, error code: %d",sigaction_code_error) ; 
+        printf("error sigaction with SIGTERM, error code: %d",sigaction_code_error) ; 
         exit(1) ; 
     }
     if ( (sigaction_code_error = sigaction(SIGPIPE ,&sa, NULL)) <0){
@@ -114,9 +116,7 @@ void block_signals() {
 	sigset_t set;
     int s;
     sigemptyset(&set);
-    sigaddset(&set, SIGINT);
-    sigaddset(&set, SIGPIPE);
-	sigaddset(&set, SIGTERM);
+    sigaddset(&set, SIGINT | SIGPIPE | SIGTERM);
     pthread_sigmask(SIG_BLOCK, &set, NULL);
 
 }
@@ -135,7 +135,6 @@ void unlock_signals(){
 
 
 void* tcp_server_connect (void *par){ 
- 	unlock_signals() ; 
 	pthread_t phtread_rx,phtread_tx  ;  
 	socklen_t addr_len;
 	struct sockaddr_in clientaddr;
@@ -252,6 +251,7 @@ void tcp_server_transmit(void *buffer_tx){
 
 
 void* serial_service_uart(void *pv) { 
+ 	unlock_signals() ; 
 	int response_open  = serial_open(1,115200) ; 
 	serial_interface_connected = 1 ; 
 	int rx_value = 0 ; 
@@ -269,7 +269,6 @@ pthread_mutex_lock (&mutexData);
 			serial_interface_connected = 0 ;
 			printf("disconnect to serial port\r\n") ; 
 			serial_close() ; 
-
 			response_open = DISCONNECT_SERIAL_SERVICE ; 
 			socket_connected_flag = 1 ; 
 		}

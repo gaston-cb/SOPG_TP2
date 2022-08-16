@@ -1,4 +1,9 @@
 hilo principal 
- --> hilo de serialservice --> hilo rx, hilo tx  
- --> hilo de accept -- > si hay accept -->hilo de rx, hilo de tx 
+ seteo de señales 
+ bloqueo de señales 
+  --> hilo de accept -- > si hay accept -->hilo de rx -> si recibo ->serial_send 
+
+ --> hilo de serialservice --> while (true) -> si recibo -> tx por socket 
+                            --> desbloqueo de señales 
+
 
