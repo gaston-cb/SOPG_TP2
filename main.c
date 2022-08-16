@@ -52,23 +52,22 @@ void signals_set() ;
 void block_signals() ; 
 void unlock_signals() ; 
 
-int socket_connected_flag	    = 0 ; 
-int socket_file_descriptor_tx   = 0 ; 
-int serial_interface_connected  = 0 ; 
-int socket_connected_accept 	= 0 ; 
-
+volatile int socket_connected_flag	    = 0 ; 
+volatile int socket_file_descriptor_tx   = 0 ; 
+volatile int serial_interface_connected  = 0 ; 
+volatile int socket_connected_accept 	= 0 ; 
+volatile int cancel_program_thread =  0 ; 
 
 pthread_mutex_t mutexData = PTHREAD_MUTEX_INITIALIZER ;//  connected_sockets_flag_protect ; 
 
 //!ctrl + c 
 void sighandler(int signal) { 
-	write(1,"sigint",7 ) ; 
-	pthread_mutex_lock (&mutexData);
-		serial_interface_connected = 0 ; 
-		socket_connected_flag   = 0	; 
-		socket_connected_accept = 0 ; 
-		socket_connected_accept = 0 ; 
-	pthread_mutex_unlock (&mutexData);
+ 
+	serial_interface_connected = 0 ; 
+	socket_connected_flag   = 0	; 
+	socket_connected_accept = 0 ; 
+	socket_connected_accept = 0 ; 
+	cancel_program_thread = 0 ; 
 }
 
 
@@ -84,8 +83,11 @@ int main(void)
 	block_signals() ; 
 	pthread_create(&phtread_tcp, NULL, tcp_server_connect, NULL);
 
- 	pthread_create(&phtread_tcp, NULL, serial_service_uart, NULL);
-
+ 	pthread_create(&phtread_serial, NULL, serial_service_uart, NULL);
+	unlock_signals() ; 
+	cancel_program_thread = 1 ; 	
+	while (cancel_program_thread == 1 ){ sleep(2) ; }
+// 	phtread_cancel() ;  
 	pthread_join(phtread_tcp, NULL);
 	pthread_join(phtread_serial, NULL);
 	exit(EXIT_SUCCESS);
