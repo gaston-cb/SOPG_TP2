@@ -1,0 +1,4 @@
+hilo principal 
+ --> hilo de serialservice --> hilo rx, hilo tx  
+ --> hilo de accept -- > si hay accept -->hilo de rx, hilo de tx 
+

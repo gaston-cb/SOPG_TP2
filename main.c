@@ -14,6 +14,10 @@
 #include <stdlib.h>
 #include <string.h> 
 #include "SerialManager.h"
+#include <assert.h>
+#include <pthread.h>
+#include <unistd.h>
+
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <netinet/in.h>
@@ -24,8 +28,12 @@
 #define SOCKET_DISCONNECT_VALUE -1 
 #define DISCONNECT_SERIAL_SERVICE 1 
 
-void serial_service_uart(void) ; 
-int tcp_server_receive(void) ; 
+void* serial_service_uart(void *pv) ; 
+void* tcp_server_connect (void *par) ; 
+void* tcp_server_receive (void *par) ; 
+void tcp_server_transmit(void *par) ; 
+int socket_connected_flag = 1 ; 
+int socket_file_descriptor_tx = 0 ; 
 /*
 1) La función que lee datos del puerto serie no es bloqueante.
 2) La función que lee datos del cliente tcp es bloqueante. No cambiar este comportamiento.
@@ -53,20 +61,28 @@ el sistema.
 
 int main(void)
 {
-	serial_service_uart() ; 
+	pthread_t phtread_tcp ; 
+	pthread_t phtread_serial ; 
+ 	pthread_create(&phtread_tcp, NULL, serial_service_uart, NULL);
+ 	pthread_create(&phtread_tcp, NULL, tcp_server_connect, NULL);
+	
+	pthread_join(phtread_tcp, NULL);
+	pthread_join(phtread_serial, NULL);
+
+	printf("end program ! ") ; 
 	///tcp_server_receive() ; 
 	exit(EXIT_SUCCESS);
 }
 
 
-
-int tcp_server_receive(void){ 
+void* tcp_server_connect (void *par){ 
+	pthread_t phtread_rx,phtread_tx  ;  
 	socklen_t addr_len;
 	struct sockaddr_in clientaddr;
 	struct sockaddr_in serveraddr;
-	char buffer[128];
+	
 	int newfd;
-	int n;	
+	int socket_connected  = 0 ; 
 	int s = socket(AF_INET,SOCK_STREAM, 0);
 	bzero((char*) &serveraddr, sizeof(serveraddr));
     serveraddr.sin_family = AF_INET;
@@ -74,64 +90,107 @@ int tcp_server_receive(void){
     if(inet_pton(AF_INET, "127.0.0.1", &(serveraddr.sin_addr))<=0)
     {
       	fprintf(stderr,"ERROR invalid server IP\r\n");
-    	return 1;
     }
 		if (bind(s, (struct sockaddr*)&serveraddr, sizeof(serveraddr)) == -1) {
 		close(s);
 		perror("listener: bind");
-		return 1;
 	}
 
 	// Seteamos socket en modo Listening
-	if (listen (s, 10) == -1) // backlog=10
+	if (listen (s, 10) == -1) // backlog=10--> consultar ! 
   	{
 		perror("error en listen");
     	exit(1);
   	}
-
-	while(1)
+	socket_connected_flag = 1 ; 
+	while(socket_connected_flag)
 	{
 		addr_len = sizeof(struct sockaddr_in);
     	if ( (newfd = accept(s, (struct sockaddr *)&clientaddr,&addr_len)) == -1)
     	{
 	    	perror("error accept"); 
 	    	exit(1);
-		}		
-		////!thread_rx , thread_tx 
-		while(1) 
-		{ 
-			n = read(newfd, buffer, 128) ; 
-			if( n == -1 )
-			{
-				perror("Error leyendo mensaje en socket");
-				exit(1) ; 
-			}else if(n == 0) { 
-				//romper bloque y salir ! EOF 
-			}
-			buffer[n]=0x00; //'\0' 
-			printf("escribi %d bytes.:%s\n",n,buffer);	
-			sleep(2) ; 
-		}	
-	} // fin while
-	printf("end program after while \r\n") ; 
-	return 0 ; 
+		}
+		socket_file_descriptor_tx = newfd ; 
+		pthread_create(&phtread_tx, NULL, tcp_server_receive, (void *)&newfd);
+		pthread_create(&phtread_rx, NULL, tcp_server_receive, (void *)&newfd);
+		pthread_join(phtread_tx,NULL ) ; 	
+		pthread_join(phtread_rx,NULL ) ; 
+	}
+	close(newfd) ; 
+	close(s) ; 
 }
 
 
 
 
 
-void serial_service_uart(void) { 
+void* tcp_server_receive(void *par)
+{ 
+		int *file_descriptor_socket ; 
+		int socket_connected = 1 ; 
+		char buffer[128];
+		int n;	
+		file_descriptor_socket = (int *)par ; 
+		while(socket_connected_flag) 
+		{ 
+			n = read(*file_descriptor_socket, buffer, 128) ; 
+			if( n == -1 )
+			{
+				perror("Error leyendo mensaje en socket");
+				exit(1) ; 
+			}else if(n == 0) { 
+				socket_connected_flag = 0 ; 
+			}
+			buffer[n]=0x00; //'\0' 
+			printf("escribi %d bytes.:%s\n",n,buffer);	
+		}	
+	printf("end program after while \r\n") ; 
+}
+
+
+
+void tcp_server_transmit(void *buffer_tx){
+		//! check error for socket connect 
+		if (socket_file_descriptor_tx==0){
+			return ; 
+		}
+		int socket_connected = 1 ; 
+		char buffer[128];
+		memcpy(buffer, buffer_tx,128) ;  //fuente, destindo
+		int n;	
+		 
+		while(socket_connected_flag) 
+		{ 
+			n = write(socket_file_descriptor_tx, buffer, 20) ; 
+			if( n == -1 )
+			{
+				perror("Error leyendo mensaje en socket");
+				exit(1) ; 
+			}else if(n == 0) { 
+				socket_connected_flag = 0 ; //protejer con mutex 
+			}
+			buffer[n]=0x00 ; 
+			printf("escribi %d bytes.:%s\r\n",n,buffer);	
+		}	
+	printf("end program after while \r\n") ; 
+}
+
+
+
+
+
+
+void* serial_service_uart(void *pv) { 
 	uint8_t response_open  = serial_open(1,115200) ; 
 	int rx_value = 0 ; 
 	char buff[10]  ; 
-	char *pdata = ">OUT:1,1\r\n" ; 
 	while(!response_open) ///! consultar sobre este caso 
 	{ 		
     	rx_value = serial_receive(buff,10) ; 
 		if (rx_value >0){ 
-			printf("%s\r\n", buff) ; 
-			serial_send(pdata, 10) ; 
+			printf("buffer rx: %s\r\n", buff) ; 
+			tcp_server_transmit(buff) ; 
 			memset(buff,'\0',10)  ;  ///! clean buffer 
 		}else if (rx_value == 0 ){ 
 			response_open = DISCONNECT_SERIAL_SERVICE ; 
@@ -139,5 +198,6 @@ void serial_service_uart(void) {
 		sleep(1) ; 
 	}
 	serial_close() ; 
+
 	printf("end thread of serial manage") ; 
 }
