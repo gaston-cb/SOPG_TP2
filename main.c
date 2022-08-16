@@ -17,7 +17,7 @@
 #include <assert.h>
 #include <pthread.h>
 #include <unistd.h>
-
+#include <signal.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <netinet/in.h>
@@ -34,10 +34,11 @@ void* serial_service_uart(void *pv) ;
 void* tcp_server_connect (void *par) ; 
 void* tcp_server_receive (void *par) ; 
 void tcp_server_transmit(void *par) ; 
-int socket_connected_flag = 1 ; 
+void signals_set() ; 
+int socket_connected_flag = 0 ; 
 int socket_file_descriptor_tx = 0 ; 
 int serial_interface_connected = 0 ; 
-/*
+/* Trabajo práctico 2 
 1) La función que lee datos del puerto serie no es bloqueante.
 2) La función que lee datos del cliente tcp es bloqueante. No cambiar este comportamiento.
 3) Dadas las condiciones de los puntos 1 y 2, se recomienda lanzar un thread para manejar la
@@ -55,27 +56,58 @@ el sistema.
    - Mutexes (De ser necesario)
 */ 
 
-///! void handlers_signals() { //SIGINT, SIGTERM ,  }
+void sighandler(int signal) { 
+	write(1,"sigint",7 ) ; 
+	serial_interface_connected = 0 ; 
+	socket_connected_flag = 0 ; 	
 
-///! leer datos del puerto serial es non-blocking 
-
+}
 
 
 pthread_mutex_t mutexData = PTHREAD_MUTEX_INITIALIZER ;//  connected_sockets_flag_protect ; 
 
+
+
 int main(void)
 {
+	
+	
 	pthread_t phtread_tcp ; 
 	pthread_t phtread_serial ; 
  	pthread_create(&phtread_tcp, NULL, serial_service_uart, NULL);
  	pthread_create(&phtread_tcp, NULL, tcp_server_connect, NULL);
-	
+	signals_set() ; 
 	pthread_join(phtread_tcp, NULL);
 	pthread_join(phtread_serial, NULL);
 
-	printf("end program ! ") ; 
-	///tcp_server_receive() ; 
+
 	exit(EXIT_SUCCESS);
+}
+
+
+void signals_set(){ 
+    struct sigaction sa;
+	sa.sa_handler = sighandler;
+    sa.sa_flags = (SIGPIPE | SIGTERM | SIGINT); // or SA_RESTART
+    int sigaction_code_error ; 
+	sigemptyset(&sa.sa_mask);
+    if ( (sigaction_code_error = sigaction(SIGUSR1 ,&sa, NULL)) <0){
+        printf("error sigaction with SIGUSR1, error code: %d",sigaction_code_error) ; 
+        exit(1) ; 
+    }
+    if ( (sigaction_code_error = sigaction(SIGTERM ,&sa, NULL)) <0){
+        printf("error sigaction with SIGUSR2, error code: %d",sigaction_code_error) ; 
+        exit(1) ; 
+    }
+    if ( (sigaction_code_error = sigaction(SIGPIPE ,&sa, NULL)) <0){
+        printf("error sigaction with SIGPIPE, error code: %d",sigaction_code_error) ; 
+        exit(1) ; 
+    }
+    if ( (sigaction_code_error = sigaction(SIGINT ,&sa, NULL)) <0){
+        printf("error sigaction with SIGINT, error code: %d",sigaction_code_error) ; 
+        exit(1) ; 
+    }
+
 }
 
 
@@ -95,9 +127,10 @@ void* tcp_server_connect (void *par){
     {
       	fprintf(stderr,"ERROR invalid server IP\r\n");
     }
-		if (bind(s, (struct sockaddr*)&serveraddr, sizeof(serveraddr)) == -1) {
-		close(s);
-		perror("listener: bind");
+	if (bind(s, (struct sockaddr*)&serveraddr, sizeof(serveraddr)) == -1) {
+		perror("reintentando conexión ");
+		close(s) ; 
+		exit(1) ; 
 	}
 
 	// Seteamos socket en modo Listening
@@ -107,7 +140,7 @@ void* tcp_server_connect (void *par){
     	exit(1);
   	}
 	socket_connected_flag = 1 ; 
-	while(socket_connected_flag)
+	while(1)
 	{
 		addr_len = sizeof(struct sockaddr_in);
     	if ( (newfd = accept(s, (struct sockaddr *)&clientaddr,&addr_len)) == -1)
@@ -159,12 +192,13 @@ void* tcp_server_receive(void *par)
 			pthread_mutex_unlock (&mutexData);
 		
 		}	
-	printf("end program after while \r\n") ; 
+	printf("end program after receive \r\n") ; 
 }
 
 
 
 void tcp_server_transmit(void *buffer_tx){
+		printf("tcp_server_transmit \r\n") ; 
 		if (socket_file_descriptor_tx==0){
 			return ; 
 		}
@@ -188,50 +222,40 @@ void tcp_server_transmit(void *buffer_tx){
 			}
 			buffer[n] = 0x00; 
 			printf("escribi %d bytes.:%s\r\n",n,buffer);	
-			/*pthread_mutex_lock (&mutexData);
-			if (serial_interface_connected == 1){
-				//(buffer,128 ) ; 
-			}
-			pthread_mutex_unlock (&mutexData);
-			*/ 
 		}	
 	printf("end program after while \r\n") ; 
 }
 
 
-
-
-
-
 void* serial_service_uart(void *pv) { 
-	uint8_t response_open  = serial_open(1,115200) ; 
+	int response_open  = serial_open(1,115200) ; 
 	serial_interface_connected = 1 ; 
 	int rx_value = 0 ; 
 	char buff[10]  ; //if (!respose_open) -> response_open == 0 
-	while(!response_open) ///! consultar sobre este caso 
+	printf("response_open = %d\r\n",response_open) ; 
+pthread_mutex_lock (&mutexData);
+	while(serial_interface_connected) ///! consultar sobre este caso 
 	{ 		
-    	pthread_mutex_lock (&mutexData);
 		rx_value = serial_receive(buff,10) ; 
 		if (rx_value >0){ 
 			printf("buffer rx: %s\r\n", buff) ; 
 			tcp_server_transmit(buff) ; 
 			memset(buff,'\0',10)  ;  ///! clean buffer 
 		}else if (rx_value == 0 ){ 
+			serial_interface_connected = 0 ;
 			printf("disconnect to serial port\r\n") ; 
+			serial_close() ; 
+
 			response_open = DISCONNECT_SERIAL_SERVICE ; 
+			socket_connected_flag = 1 ; 
 		}
-		if (socket_connected_flag == 0) { 
-			break ; 
-		}
-		pthread_mutex_unlock (&mutexData);
+pthread_mutex_unlock (&mutexData);
 		usleep(1000) ; 
 	}
 	printf("end thread of serial manage") ; 
-
-	serial_close() ; 
-	pthread_mutex_lock (&mutexData);
+pthread_mutex_lock (&mutexData);
 	socket_connected_flag = 0 ; //protejer con mutex 
 	serial_interface_connected = 0 ; 
-	pthread_mutex_unlock (&mutexData);
+pthread_mutex_unlock (&mutexData);
 	printf("end thread serial manage") ; 
 }
