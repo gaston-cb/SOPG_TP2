@@ -47,7 +47,7 @@
 void* serial_service_uart(void *pv) ; 
 void* tcp_server_connect (void *par) ; 
 void* tcp_server_receive (void *par) ; 
-void tcp_server_transmit(void *par) ; 
+void tcp_server_transmit(char *par,int size_buff)  ; 
 void signals_set() ; 
 void block_signals() ; 
 void unlock_signals() ; 
@@ -212,7 +212,7 @@ void* tcp_server_receive(void *par)
 			
 			pthread_mutex_lock (&mutexData);
 			if (serial_interface_connected == 1){
-				serial_send(buffer,128 ) ; 
+				serial_send(buffer,n ) ; 
 			}
 			pthread_mutex_unlock (&mutexData);
 		
@@ -222,19 +222,17 @@ void* tcp_server_receive(void *par)
 
 
 
-void tcp_server_transmit(void *buffer_tx){
+void tcp_server_transmit(char *buffer_tx, int size_buffer){
 		printf("tcp_server_transmit \r\n") ; 
 		if (socket_file_descriptor_tx==0){
 			return ; 
 		}
 		int socket_connected = 1 ; 
-		char buffer[128];
-		memcpy(buffer, buffer_tx,128) ;  //fuente, destindo
 		int n;	
 		 
 		if(socket_connected_flag) 
 		{ 
-			n = write(socket_file_descriptor_tx, buffer, 20) ; 
+			n = write(socket_file_descriptor_tx, buffer_tx, size_buffer) ; 
 			if( n == -1 )
 			{
 				perror("Error leyendo mensaje en socket");
@@ -245,8 +243,7 @@ void tcp_server_transmit(void *buffer_tx){
 				socket_connected_flag = 0 ; //protejer con mutex 
 				pthread_mutex_unlock (&mutexData);
 			}
-			buffer[n] = 0x00; 
-			printf("escribi %d bytes.:%s\r\n",n,buffer);	
+			printf("escribi %d bytes.:%s\r\n",n, buffer_tx);	
 		}	
 	printf("end transmit socket connect  \r\n") ; 
 }
@@ -264,7 +261,7 @@ pthread_mutex_lock (&mutexData);
 		rx_value = serial_receive(buff,10) ; 
 		if (rx_value >0){ 
 			printf("buffer rx: %s\r\n", buff) ; 
-			tcp_server_transmit(buff) ; 
+			tcp_server_transmit(buff,rx_value)  ; 
 			memset(buff,'\0',10)  ;  ///! clean buffer 
 		}else if (rx_value == 0 ){ 
 			serial_interface_connected = 0 ;
