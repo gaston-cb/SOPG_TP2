@@ -7,7 +7,21 @@
  * @date 2022-08-09
  * 
  * @copyright Copyright (c) 2022
- * 
+ *	1) La función que lee datos del puerto serie no es bloqueante.
+ *	2) La función que lee datos del cliente tcp es bloqueante. No cambiar este comportamiento.
+ *	3) Dadas las condiciones de los puntos 1 y 2, se recomienda lanzar un thread para manejar la
+ * 	   comunicación con el cliente TCP y otro (opcional, no necesario) para la comunicación con el puerto 
+ * 	   serie 
+ *	4) No generar condiciones donde el uso del CPU llegue al 100% (bucles sin ejecución bloqueante).
+ *	5) El programa debe soportar que el cliente se desconecte, se vuelva a conectar y siga funcionando
+ *	el sistema.
+ *	6) El programa debe poder terminar correctamente si se le envía la signal SIGINT o SIGTERM.
+ *	7) Se debe considerar sobre qué hilo de ejecución se ejecutarán los handlers de las signals.
+ *	8) Los temas que deberán implementarse en el desarrollo son los siguientes:
+ *   - Sockets
+ *   - Threads
+ *   - Signals
+ *   - Mutexes (De ser necesario)
  */
 #include <stdint.h>
 #include <stdio.h>
@@ -35,52 +49,43 @@ void* tcp_server_connect (void *par) ;
 void* tcp_server_receive (void *par) ; 
 void tcp_server_transmit(void *par) ; 
 void signals_set() ; 
-int socket_connected_flag = 0 ; 
-int socket_file_descriptor_tx = 0 ; 
-int serial_interface_connected = 0 ; 
-/* Trabajo práctico 2 
-1) La función que lee datos del puerto serie no es bloqueante.
-2) La función que lee datos del cliente tcp es bloqueante. No cambiar este comportamiento.
-3) Dadas las condiciones de los puntos 1 y 2, se recomienda lanzar un thread para manejar la
-   comunicación con el cliente TCP y otro (opcional, no necesario) para la comunicación con el puerto 
-   serie 
-4) No generar condiciones donde el uso del CPU llegue al 100% (bucles sin ejecución bloqueante).
-5) El programa debe soportar que el cliente se desconecte, se vuelva a conectar y siga funcionando
-el sistema.
-6) El programa debe poder terminar correctamente si se le envía la signal SIGINT o SIGTERM.
-7) Se debe considerar sobre qué hilo de ejecución se ejecutarán los handlers de las signals.
-8) Los temas que deberán implementarse en el desarrollo son los siguientes:
-   - Sockets
-   - Threads
-   - Signals
-   - Mutexes (De ser necesario)
-*/ 
+void block_signals() ; 
+void unlock_signals() ; 
 
-void sighandler(int signal) { 
-	write(1,"sigint",7 ) ; 
-	serial_interface_connected = 0 ; 
-	socket_connected_flag = 0 ; 	
-
-}
+int socket_connected_flag	    = 0 ; 
+int socket_file_descriptor_tx   = 0 ; 
+int serial_interface_connected  = 0 ; 
+int socket_connected_accept 	= 0 ; 
 
 
 pthread_mutex_t mutexData = PTHREAD_MUTEX_INITIALIZER ;//  connected_sockets_flag_protect ; 
+
+//!ctrl + c 
+void sighandler(int signal) { 
+	write(1,"sigint",7 ) ; 
+	pthread_mutex_lock (&mutexData);
+		serial_interface_connected = 0 ; 
+		socket_connected_flag   = 0	; 
+		socket_connected_accept = 0 ; 
+		socket_connected_accept = 0 ; 
+	pthread_mutex_unlock (&mutexData);
+}
+
+
 
 
 
 int main(void)
 {
 	
-	
+	signals_set() ; 
 	pthread_t phtread_tcp ; 
 	pthread_t phtread_serial ; 
+	block_signals() ; 
  	pthread_create(&phtread_tcp, NULL, serial_service_uart, NULL);
- 	pthread_create(&phtread_tcp, NULL, tcp_server_connect, NULL);
-	signals_set() ; 
+	pthread_create(&phtread_tcp, NULL, tcp_server_connect, NULL);
 	pthread_join(phtread_tcp, NULL);
 	pthread_join(phtread_serial, NULL);
-
-
 	exit(EXIT_SUCCESS);
 }
 
@@ -91,10 +96,6 @@ void signals_set(){
     sa.sa_flags = (SIGPIPE | SIGTERM | SIGINT); // or SA_RESTART
     int sigaction_code_error ; 
 	sigemptyset(&sa.sa_mask);
-    if ( (sigaction_code_error = sigaction(SIGUSR1 ,&sa, NULL)) <0){
-        printf("error sigaction with SIGUSR1, error code: %d",sigaction_code_error) ; 
-        exit(1) ; 
-    }
     if ( (sigaction_code_error = sigaction(SIGTERM ,&sa, NULL)) <0){
         printf("error sigaction with SIGUSR2, error code: %d",sigaction_code_error) ; 
         exit(1) ; 
@@ -107,11 +108,34 @@ void signals_set(){
         printf("error sigaction with SIGINT, error code: %d",sigaction_code_error) ; 
         exit(1) ; 
     }
+}
+
+void block_signals() { 
+	sigset_t set;
+    int s;
+    sigemptyset(&set);
+    sigaddset(&set, SIGINT);
+    sigaddset(&set, SIGPIPE);
+	sigaddset(&set, SIGTERM);
+    pthread_sigmask(SIG_BLOCK, &set, NULL);
 
 }
 
+void unlock_signals(){ 
+	sigset_t set;
+    int s;
+    sigemptyset(&set);
+    sigaddset(&set, SIGINT);
+    sigaddset(&set, SIGPIPE);
+	sigaddset(&set, SIGTERM);
+    pthread_sigmask(SIG_UNBLOCK, &set, NULL);
+}
+
+
+
 
 void* tcp_server_connect (void *par){ 
+ 	unlock_signals() ; 
 	pthread_t phtread_rx,phtread_tx  ;  
 	socklen_t addr_len;
 	struct sockaddr_in clientaddr;
@@ -139,8 +163,8 @@ void* tcp_server_connect (void *par){
 		perror("error en listen");
     	exit(1);
   	}
-	socket_connected_flag = 1 ; 
-	while(1)
+	socket_connected_accept = 1 ; 
+	while(socket_connected_accept)
 	{
 		addr_len = sizeof(struct sockaddr_in);
     	if ( (newfd = accept(s, (struct sockaddr *)&clientaddr,&addr_len)) == -1)
@@ -150,8 +174,8 @@ void* tcp_server_connect (void *par){
 		}
 		pthread_mutex_lock (&mutexData);
 		socket_file_descriptor_tx = newfd ; 
+		socket_connected_flag = 1 ; 
 		pthread_mutex_unlock (&mutexData);
-		
 		pthread_create(&phtread_tx, NULL, tcp_server_receive, (void *)&newfd);
 		pthread_join(phtread_tx,NULL ) ; 	
 	}
@@ -223,7 +247,7 @@ void tcp_server_transmit(void *buffer_tx){
 			buffer[n] = 0x00; 
 			printf("escribi %d bytes.:%s\r\n",n,buffer);	
 		}	
-	printf("end program after while \r\n") ; 
+	printf("end transmit socket connect  \r\n") ; 
 }
 
 
@@ -254,8 +278,10 @@ pthread_mutex_unlock (&mutexData);
 	}
 	printf("end thread of serial manage") ; 
 pthread_mutex_lock (&mutexData);
+	socket_file_descriptor_tx = 0 ; 
 	socket_connected_flag = 0 ; //protejer con mutex 
 	serial_interface_connected = 0 ; 
+	socket_connected_accept = 0 ; 
 pthread_mutex_unlock (&mutexData);
 	printf("end thread serial manage") ; 
 }
