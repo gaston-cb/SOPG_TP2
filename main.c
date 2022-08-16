@@ -253,7 +253,6 @@ void tcp_server_transmit(void *buffer_tx){
 
 
 void* serial_service_uart(void *pv) { 
- 	unlock_signals() ; 
 	int response_open  = serial_open(1,115200) ; 
 	serial_interface_connected = 1 ; 
 	int rx_value = 0 ; 
